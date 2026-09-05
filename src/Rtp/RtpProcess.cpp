@@ -113,6 +113,12 @@ bool RtpProcess::inputRtp(bool is_udp, const Socket::Ptr &sock, const char *data
         // First time running this function
         bool first = !_sock;
         _sock = sock;
+        if (first) {
+            // A UDP listener socket may reach the process without a dedicated
+            // RtpSession. Start accounting as soon as that socket is known.
+            sock->getRecvSpeed();
+            sock->getSendSpeed();
+        }
         _addr.reset(new sockaddr_storage(*((sockaddr_storage *)addr)));
         if (first) {
             emitOnPublish(ntohl(header->ssrc));

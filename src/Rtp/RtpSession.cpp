@@ -49,6 +49,9 @@ void RtpSession::setParams(mINI &ini) {
 
 RtpSession::RtpSession(const Socket::Ptr &sock)
     : Session(sock) {
+    // Enable socket rate accounting before the first RTP packet arrives.
+    sock->getRecvSpeed();
+    sock->getSendSpeed();
     socklen_t addr_len = sizeof(_addr);
     getpeername(sock->rawFD(), (struct sockaddr *)&_addr, &addr_len);
     _is_udp = sock->sockType() == SockNum::Sock_UDP;

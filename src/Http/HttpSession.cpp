@@ -24,6 +24,9 @@ using namespace toolkit;
 namespace mediakit {
 
 HttpSession::HttpSession(const Socket::Ptr &pSock) : Session(pSock) {
+    // Enable socket rate accounting before the first media payload is sent.
+    pSock->getRecvSpeed();
+    pSock->getSendSpeed();
     // 设置默认参数  [AUTO-TRANSLATED:ae5b72e6]
     // Set default parameters
     setMaxReqSize(0);

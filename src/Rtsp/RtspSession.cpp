@@ -52,6 +52,9 @@ static unordered_map<string, weak_ptr<RtspSession> > g_mapGetter;
 static recursive_mutex g_mtxGetter;
 
 RtspSession::RtspSession(const Socket::Ptr &sock) : Session(sock) {
+    // Enable socket rate accounting before push/play traffic starts.
+    sock->getRecvSpeed();
+    sock->getSendSpeed();
     GET_CONFIG(uint32_t,keep_alive_sec,Rtsp::kKeepAliveSecond);
     sock->setSendTimeOutSecond(keep_alive_sec);
 }

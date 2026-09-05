@@ -8,6 +8,7 @@
  * may be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <atomic>
 #include <exception>
 #include <sys/stat.h>
 #include <math.h>
@@ -39,6 +40,7 @@
 #include "WebApi.h"
 #include "WebHook.h"
 #include "FFmpegSource.h"
+#include "MediaTrafficStatistic.h"
 
 #include "Common/config.h"
 #include "Common/MediaSource.h"
@@ -389,6 +391,49 @@ void fillSockInfo(Value& val, SockInfo* info) {
     val["local_port"] = info->get_local_port();
     val["local_ip"] = info->get_local_ip();
     val["identifier"] = info->getIdentifier();
+}
+
+static Socket *getSocketFromSockInfo(SockInfo *info) {
+    if (auto socket = dynamic_cast<Socket *>(info)) {
+        return socket;
+    }
+    if (auto helper = dynamic_cast<SocketHelper *>(info)) {
+        return helper->getSock().get();
+    }
+#if defined(ENABLE_RTPPROXY)
+    if (auto process = dynamic_cast<RtpProcess *>(info)) {
+        return process->getSock().get();
+    }
+#endif
+    return nullptr;
+}
+
+static string mediaTrafficSocketKey(SockInfo *info, Socket *socket) {
+    auto identifier = info ? info->getIdentifier() : string();
+    if (!identifier.empty()) {
+        return identifier;
+    }
+    return to_string(reinterpret_cast<uintptr_t>(socket));
+}
+
+static void addOriginTraffic(const shared_ptr<MediaTrafficStatistic> &statistic, SockInfo *info) {
+    auto socket = getSocketFromSockInfo(info);
+    if (!socket) {
+        return;
+    }
+    statistic->addOrigin(mediaTrafficSocketKey(info, socket), socket->getRecvSpeed());
+}
+
+static void addPlayerTraffic(const shared_ptr<MediaTrafficStatistic> &statistic, const Session &session) {
+    auto socket = session.getSock();
+    if (!socket) {
+        return;
+    }
+    auto identifier = session.getIdentifier();
+    if (identifier.empty()) {
+        identifier = to_string(reinterpret_cast<uintptr_t>(socket.get()));
+    }
+    statistic->addPlayer(identifier, socket->getSendSpeed());
 }
 
 void dumpMediaTuple(const MediaTuple &tuple, Json::Value& item) {
@@ -1042,6 +1087,57 @@ void installWebApi() {
                 val["data"].append(makeMediaSourceJson(*media));
             }
             invoker(200, headerOut, val.toStyledString());
+        }
+    });
+
+    api_regist("/index/api/getMediaTrafficStatistic",[](API_ARGS_MAP_ASYNC){
+        CHECK_SECRET();
+        list<MediaSource::Ptr> media_list;
+        MediaSource::for_each_media([&](const MediaSource::Ptr &media) {
+            media_list.emplace_back(media);
+        }, allArgs["schema"], allArgs["vhost"], allArgs["app"], allArgs["stream"]);
+
+        auto statistic = make_shared<MediaTrafficStatistic>();
+        if (media_list.empty()) {
+            val["data"]["upstreamBytesPerSecond"] = (Json::UInt64)0;
+            val["data"]["downstreamBytesPerSecond"] = (Json::UInt64)0;
+            val["data"]["originSocketCount"] = 0;
+            val["data"]["playerSocketCount"] = 0;
+            val["data"]["unit"] = "bytes/s";
+            invoker(200, headerOut, val.toStyledString());
+            return;
+        }
+
+        auto pending = make_shared<atomic<size_t>>(media_list.size());
+        auto complete = [=]() mutable {
+            if (pending->fetch_sub(1) != 1) {
+                return;
+            }
+            auto snapshot = statistic->snapshot();
+            val["data"]["upstreamBytesPerSecond"] = (Json::UInt64)snapshot.upstream_bytes_per_second;
+            val["data"]["downstreamBytesPerSecond"] = (Json::UInt64)snapshot.downstream_bytes_per_second;
+            val["data"]["originSocketCount"] = (Json::UInt64)snapshot.origin_socket_count;
+            val["data"]["playerSocketCount"] = (Json::UInt64)snapshot.player_socket_count;
+            val["data"]["unit"] = "bytes/s";
+            invoker(200, headerOut, val.toStyledString());
+        };
+
+        for (auto &media : media_list) {
+            auto origin = media->getOriginSock();
+            if (origin) {
+                addOriginTraffic(statistic, origin.get());
+            }
+            media->getPlayerList(
+                [statistic, complete](const list<toolkit::Any> &info_list) mutable {
+                    for (auto &info : info_list) {
+                        auto &session = info.get<Session>();
+                        addPlayerTraffic(statistic, session);
+                    }
+                    complete();
+                },
+                [](toolkit::Any &&info) -> toolkit::Any {
+                    return std::move(info);
+                });
         }
     });
 

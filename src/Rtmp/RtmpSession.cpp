@@ -18,6 +18,9 @@ using namespace toolkit;
 namespace mediakit {
 
 RtmpSession::RtmpSession(const Socket::Ptr &sock) : Session(sock) {
+    // Enable socket rate accounting before push/play traffic starts.
+    sock->getRecvSpeed();
+    sock->getSendSpeed();
     GET_CONFIG(uint32_t,keep_alive_sec,Rtmp::kKeepAliveSecond);
     sock->setSendTimeOutSecond(keep_alive_sec);
 }
