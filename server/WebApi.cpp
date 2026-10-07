@@ -119,6 +119,26 @@ static void responseApi(int code, const string &msg, const HttpSession::HttpResp
     invoker(200, headerOut, res.toStyledString());
 }
 
+// 消毒用于 HTTP 响应头 quoted-string 的用户输入：去除 CR/LF 及其它控制字符以防止响应头注入(CWE-113)，
+// 并转义双引号以防止跳出引号范围。
+// Sanitize user input intended for an HTTP response header quoted-string value: strip CR/LF and other
+// control characters to prevent response header injection (CWE-113), and escape double-quotes so the
+// value cannot break out of the quoted-string.
+static string sanitizeHeaderQuotedValue(const string &value) {
+    string ret;
+    ret.reserve(value.size());
+    for (unsigned char c : value) {
+        if (c >= 0x20 && c != 0x7f) {
+            if (c == '"') {
+                ret += '\\';
+            }
+            ret += static_cast<char>(c);
+        }
+        // CR(0x0d), LF(0x0a) and other control chars are silently dropped
+    }
+    return ret;
+}
+
 static HttpApi toApi(const function<void(API_ARGS_MAP_ASYNC)> &cb) {
     return [cb](const Parser &parser, const HttpSession::HttpResponseInvoker &invoker, SockInfo &sender) {
         GET_CONFIG(string, charSet, Http::kCharSet);
@@ -904,6 +924,9 @@ void installWebApi() {
         CHECK_SECRET();
         Value obj;
         for (auto &pr : mINI::Instance()) {
+            if (pr.first == API::kSecret) {
+                continue;
+            }
             obj[pr.first] = (string &) pr.second;
         }
         val["data"].append(obj);
@@ -934,7 +957,8 @@ void installWebApi() {
                 continue;
 #endif
             }
-            if (pr.first == FFmpeg::kBin || pr.first == FFmpeg::kSnap) {
+            if (pr.first == FFmpeg::kBin || pr.first == FFmpeg::kSnap || pr.first == API::kDownloadRoot) {
+                // downloadRoot 决定 downloadFile 接口的可下载边界，禁止通过 setServerConfig 动态放宽，防止越权读取任意文件
                 WarnL << "Configuration named " << pr.first << " is not allowed to be set by setServerConfig api.";
                 continue;
             }
@@ -2503,6 +2527,10 @@ void installWebApi() {
         auto vec = toolkit::split(str, ";");
         for (auto &item : vec) {
             auto root = File::absolutePath("", item, true);
+            // 统一规范为以 '/' 结尾的目录边界，避免 www_secret 之类同级目录被 www 前缀误匹配（路径边界混淆）
+            if (root.empty() || root.back() != '/') {
+                root.push_back('/');
+            }
             ret.emplace(std::move(root));
         }
         return ret;
@@ -2518,6 +2546,7 @@ void installWebApi() {
         }
         bool safe = false;
         for (auto &root : download_roots) {
+            // download_roots 中的 root 均以 '/' 结尾，此处按目录边界匹配，杜绝前缀混淆
             if (start_with(file_path, root)) {
                 safe = true;
                 break;
@@ -2537,7 +2566,12 @@ void installWebApi() {
                 StrCaseMap res_header;
                 auto save_name = allArgs["save_name"];
                 if (!save_name.empty()) {
-                    res_header.emplace("Content-Disposition", "attachment;filename=\"" + save_name + "\"");
+                    // 消毒后再拼入 Content-Disposition，防止响应头注入(CWE-113)
+                    // Sanitize before embedding into Content-Disposition to prevent header injection (CWE-113)
+                    auto safe_name = sanitizeHeaderQuotedValue(save_name);
+                    if (!safe_name.empty()) {
+                        res_header.emplace("Content-Disposition", "attachment;filename=\"" + safe_name + "\"");
+                    }
                 }
                 invoker.responseFile(allArgs.parser.getHeader(), res_header, allArgs["file_path"]);
             }
