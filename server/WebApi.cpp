@@ -46,6 +46,8 @@
 #include "Common/MediaSource.h"
 #include "Http/HttpSession.h"
 #include "Http/HttpRequester.h"
+#include "Rtsp/RtspSession.h"
+#include "Rtmp/RtmpSession.h"
 #include "Player/PlayerProxy.h"
 #include "Pusher/PusherProxy.h"
 #include "Rtp/RtpProcess.h"
@@ -411,6 +413,31 @@ void fillSockInfo(Value& val, SockInfo* info) {
     val["local_port"] = info->get_local_port();
     val["local_ip"] = info->get_local_ip();
     val["identifier"] = info->getIdentifier();
+}
+
+// 读取播放会话存活期的累计下行字节。
+// 该计数与连接断开时 on_flow_report 上报的 totalBytes 同源(各会话类内部同一个成员变量),
+// 因此存活期采样值必然 <= 断开时的最终结算值,平台侧可以安全地做增量累加。
+// 返回 false 表示该会话断开时不会以自身 identifier 上报流量(如 HLS 切片下载,
+// 其流量由 HlsMediaSource 按 cookie 聚合上报),调用方必须省略 totalBytes 字段,
+// 让平台侧能区分「不支持实时计数」与「计数为 0」,避免与聚合上报重复计数。
+static bool getAliveTotalBytes(const Session &session, uint64_t &total_bytes) {
+    if (auto rtsp = dynamic_cast<const RtspSession *>(&session)) {
+        total_bytes = rtsp->getAliveTotalBytes();
+        return true;
+    }
+    if (auto rtmp = dynamic_cast<const RtmpSession *>(&session)) {
+        total_bytes = rtmp->getAliveTotalBytes();
+        return true;
+    }
+    if (auto http = dynamic_cast<const HttpSession *>(&session)) {
+        if (!http->isLiveStream()) {
+            return false;
+        }
+        total_bytes = http->getAliveTotalBytes();
+        return true;
+    }
+    return false;
 }
 
 static Socket *getSocketFromSockInfo(SockInfo *info) {
@@ -1200,6 +1227,10 @@ void installWebApi() {
                 auto &session = info.get<Session>();
                 fillSockInfo(*obj, &session);
                 (*obj)["typeid"] = toolkit::demangle(typeid(session).name());
+                uint64_t alive_total_bytes = 0;
+                if (getAliveTotalBytes(session, alive_total_bytes)) {
+                    (*obj)["totalBytes"] = (Json::UInt64)alive_total_bytes;
+                }
                 toolkit::Any ret;
                 ret.set(obj);
                 return ret;

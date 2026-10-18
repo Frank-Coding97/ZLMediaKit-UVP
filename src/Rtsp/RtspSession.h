@@ -36,6 +36,9 @@ public:
     using onAuth = std::function<void(bool encrypted, const std::string &pwd_or_md5)>;
 
     RtspSession(const toolkit::Socket::Ptr &sock);
+    // 存活期累计流量,与断开时 on_flow_report 上报的 totalBytes 同源(同一个 _bytes_usage),
+    // 供 getMediaPlayerList 在连接存活期间暴露实时计数
+    uint64_t getAliveTotalBytes() const { return _bytes_usage; }
     ////Session override////
     void onRecv(const toolkit::Buffer::Ptr &buf) override;
     void onError(const toolkit::SockException &err) override;

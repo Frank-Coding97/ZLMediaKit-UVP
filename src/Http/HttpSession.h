@@ -52,6 +52,14 @@ public:
     void setTimeoutSec(size_t second);
     void setMaxReqSize(size_t max_req_size);
 
+    // 存活期累计流量,与断开时 on_flow_report 上报的 totalBytes 同源(同一个 _total_bytes_usage),
+    // 供 getMediaPlayerList 在连接存活期间暴露实时计数
+    uint64_t getAliveTotalBytes() const { return _total_bytes_usage; }
+    // 是否为直播流会话(http-flv/ts/fmp4/ws 直播)。只有直播会话断开时才会
+    // 以自身 identifier 上报 on_flow_report;HLS 切片下载等普通请求不上报
+    // (其流量由 HlsMediaSource 按 cookie 聚合上报),采样时必须排除以免重复计数
+    bool isLiveStream() const { return _is_live_stream; }
+
 protected:
     //FlvMuxer override
     void onWrite(const toolkit::Buffer::Ptr &data, bool flush) override ;
