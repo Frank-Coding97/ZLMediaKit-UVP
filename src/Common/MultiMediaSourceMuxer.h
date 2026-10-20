@@ -192,6 +192,7 @@ public:
     std::string shortUrl() const;
 #if defined(ENABLE_RTPPROXY)
     void forEachRtpSender(const std::function<void(const std::string &ssrc, const RtpSender &sender)> &cb) const;
+    bool resetRtpSenderInfo(const std::string &ssrc);
 #endif // ENABLE_RTPPROXY
 
     void addProbe(uint32_t probe_ms, const std::function<void(const std::list<FrameInfo> &info_list)> &cb);

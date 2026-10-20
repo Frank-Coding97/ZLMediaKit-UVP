@@ -1894,11 +1894,45 @@ void installWebApi() {
         CHECK(muxer, "get muxer from media source failed");
 
         src->getOwnerPoller()->async([=]() mutable {
+            Json::Value rtp_info(Json::objectValue);
             muxer->forEachRtpSender([&](const std::string &ssrc, const RtpSender &sender) mutable {
                 val["data"].append(ssrc);
                 val["bytesSpeed"] = (Json::UInt64)sender.getSendSpeed();
                 val["totalBytes"] = (Json::UInt64)sender.getSendTotalBytes();
+                uint16_t seq = 0;
+                uint32_t rtptime = 0;
+                if (sender.getFirstRtpInfo(seq, rtptime)) {
+                    Json::Value info(Json::objectValue);
+                    info["seq"] = (Json::UInt)seq;
+                    info["rtptime"] = (Json::UInt)rtptime;
+                    rtp_info[ssrc] = info;
+                }
             });
+            if (!rtp_info.empty()) {
+                val["rtp_info"] = rtp_info;
+            }
+            invoker(200, headerOut, val.toStyledString());
+        });
+    });
+
+    // Reset the first-packet sample for one sender.  The existing sender list
+    // response remains backward compatible; this endpoint is used before a
+    // seek/resume so the next observed packet is tied to the new position.
+    api_regist("/index/api/resetRtpSenderInfo",[](API_ARGS_MAP_ASYNC){
+        CHECK_SECRET();
+        CHECK_ARGS("vhost", "app", "stream", "ssrc");
+
+        auto src = MediaSource::find(allArgs["vhost"], allArgs["app"], allArgs["stream"]);
+        if (!src) {
+            throw ApiRetException("can not find the source stream", API::NotFound);
+        }
+        auto muxer = src->getMuxer();
+        CHECK(muxer, "get muxer from media source failed");
+        src->getOwnerPoller()->async([=]() mutable {
+            if (!muxer->resetRtpSenderInfo(allArgs["ssrc"])) {
+                val["code"] = API::OtherFailed;
+                val["msg"] = "resetRtpSenderInfo failed";
+            }
             invoker(200, headerOut, val.toStyledString());
         });
     });

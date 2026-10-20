@@ -16,6 +16,7 @@
 #include "Rtcp/RtcpContext.h"
 #include "Common/MediaSource.h"
 #include "Common/MediaSink.h"
+#include <mutex>
 
 namespace mediakit{
 
@@ -99,6 +100,11 @@ public:
     size_t getRecvTotalBytes() const;
     size_t getSendTotalBytes() const;
 
+    // Return the first RTP packet observed after the sender was started or
+    // explicitly reset.  The values are used by GB28181 RTP-Info responses.
+    bool getFirstRtpInfo(uint16_t &seq, uint32_t &rtptime) const;
+    void resetFirstRtpInfo();
+
 private:
     // 合并写输出  [AUTO-TRANSLATED:23544836]
     // Merge write output
@@ -127,6 +133,10 @@ private:
     std::shared_ptr<RtpSession> _rtp_session;
     std::function<void(const toolkit::SockException &ex)> _on_close;
     std::weak_ptr<MultiMediaSourceMuxer> _muxer;
+    mutable std::mutex _rtp_info_mutex;
+    bool _has_first_rtp_info = false;
+    uint16_t _first_rtp_seq = 0;
+    uint32_t _first_rtp_stamp = 0;
 };
 
 }//namespace mediakit

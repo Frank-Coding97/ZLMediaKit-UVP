@@ -38,6 +38,7 @@ RtpSender::~RtpSender() {
 void RtpSender::startSend(const MediaSourceEvent &sender, const MediaSourceEvent::SendRtpArgs &args, const function<void(uint16_t local_port, const SockException &ex)> &cb){
     _muxer = sender.getMuxer(MediaSource::NullMediaSource());
     _args = args;
+    resetFirstRtpInfo();
     if (!_interface) {
         // 重连时不重新创建对象  [AUTO-TRANSLATED:b788cd5d]
         // Do not recreate the object when reconnecting
@@ -420,6 +421,15 @@ void RtpSender::onFlushRtpList(shared_ptr<List<Buffer::Ptr>> rtp_list) {
         size_t i = 0;
         auto size = rtp_list->size();
         rtp_list->for_each([&](Buffer::Ptr &packet) {
+            if (i == 0) {
+                auto rtp = static_pointer_cast<RtpPacket>(packet);
+                lock_guard<mutex> lock(_rtp_info_mutex);
+                if (!_has_first_rtp_info) {
+                    _first_rtp_seq = rtp->getSeq();
+                    _first_rtp_stamp = rtp->getStamp();
+                    _has_first_rtp_info = true;
+                }
+            }
             switch (_args.con_type) {
                 case MediaSourceEvent::SendRtpArgs::kUdpActive:
                 case MediaSourceEvent::SendRtpArgs::kUdpPassive: {
@@ -521,6 +531,23 @@ size_t RtpSender::getSendTotalBytes() const {
         ret += _socket_rtcp->getSendTotalBytes();
     }
     return ret;
+}
+
+bool RtpSender::getFirstRtpInfo(uint16_t &seq, uint32_t &rtptime) const {
+    lock_guard<mutex> lock(_rtp_info_mutex);
+    if (!_has_first_rtp_info) {
+        return false;
+    }
+    seq = _first_rtp_seq;
+    rtptime = _first_rtp_stamp;
+    return true;
+}
+
+void RtpSender::resetFirstRtpInfo() {
+    lock_guard<mutex> lock(_rtp_info_mutex);
+    _has_first_rtp_info = false;
+    _first_rtp_seq = 0;
+    _first_rtp_stamp = 0;
 }
 
 } // namespace mediakit

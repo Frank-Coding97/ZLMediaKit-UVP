@@ -231,6 +231,25 @@ void MultiMediaSourceMuxer::forEachRtpSender(const std::function<void(const std:
         }
     }
 }
+
+bool MultiMediaSourceMuxer::resetRtpSenderInfo(const std::string &ssrc) {
+    bool reset = false;
+    for (auto &pr : _rtp_sender) {
+        if (!ssrc.empty() && pr.first != ssrc) {
+            continue;
+        }
+        auto sender = std::get<1>(pr.second).lock();
+        if (!sender) {
+            continue;
+        }
+        sender->resetFirstRtpInfo();
+        reset = true;
+        if (!ssrc.empty()) {
+            break;
+        }
+    }
+    return reset;
+}
 #endif // ENABLE_RTPPROXY
 MultiMediaSourceMuxer::MultiMediaSourceMuxer(const MediaTuple& tuple, float dur_sec, const ProtocolOption &option): _tuple(tuple) {
     if (!option.stream_replace.empty()) {
