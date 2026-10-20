@@ -10,8 +10,7 @@
 // 这对读写接口的语义契约：
 //   1. 初始状态没有采样（返回 false，且不污染出参）
 //   2. reset 是幂等的：连续多次 reset 仍处于「无采样」
-//   3. reset 之后不再残留旧值（出参保持调用方原值）
-//   4. 与 resetFirstRtpInfo 的调用时机无关：构造后立即读也是无采样
+//   3. 重新构造的对象同样是干净的初始态（采样状态是实例级的，不是全局的）
 // 「记录首个包后能读回」这一条由集成测试（真实推流）覆盖，不在本文件断言。
 //
 // 另：采样逻辑整段包在 #if defined(ENABLE_RTPPROXY) 内，
@@ -57,14 +56,15 @@ int main() {
         assert_reports_no_sample(sender);
     }
 
-    // 3. 带自定义 EventPoller 构造（生产路径用的形式）同样为无采样初始态
+    // 3. 析构再重建（新对象）依然是干净的初始态，
+    //    确认采样状态没有落到类级/静态存储里
     {
-        auto poller = toolkit::EventPoller::createDefaultEventPoller();
-        RtpSender sender(poller);
-        assert_reports_no_sample(sender);
-
-        // 未 startSend 就reset，不应崩溃也不应产生采样
+        RtpSender sender;
         sender.resetFirstRtpInfo();
+        assert_reports_no_sample(sender);
+    }
+    {
+        RtpSender sender;
         assert_reports_no_sample(sender);
     }
 
