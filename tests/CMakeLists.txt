@@ -44,8 +44,8 @@ set(GATING_TESTS
   test_amf
   test_hls_cookie_data
   test_rtp_sender_first_rtp_info
+  test_media_source_tracks
   test_sortor
-  test_rtx_twcc
   test_webrtc_regression)
 
 foreach(TEST_SRC ${TEST_SRC_LIST})
@@ -60,7 +60,7 @@ foreach(TEST_SRC ${TEST_SRC_LIST})
 
   if(NOT TARGET ZLMediaKit::WebRTC)
     # 暂时过滤掉依赖 WebRTC 的测试模块
-    if("${TEST_EXE_NAME}" MATCHES "test_rtcp_nack|test_webrtc_regression|test_turn_allocation|test_rtx_twcc")
+    if("${TEST_EXE_NAME}" MATCHES "test_rtcp_nack|test_webrtc_regression|test_turn_allocation")
       continue()
     endif()
   endif()
